@@ -1,3 +1,10 @@
 PyMuPDF==1.27.1
 pydantic==2.12.5
 langchain_groq==1.1.2
+fastapi==0.135.1
+uvicorn==0.41.0
+python-multipart==0.0.22
+sqlalchemy==2.0.48
+psyscopg2-binary==2.9.11
+passlib[bcrypt]
+python-jose==3.5.0

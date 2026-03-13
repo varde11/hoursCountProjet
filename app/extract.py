@@ -1,13 +1,19 @@
 import fitz
 import re
 import unicodedata
+import os
 
 
 
 def extract_text_pdf(pdf_path: str) -> str:
-    doc = fitz.open(pdf_path)
-    return "\n".join(page.get_text("text",sort=True) for page in doc)
-
+    if not os.path.isfile(pdf_path) or not pdf_path.lower().endswith(".pdf"):
+        return ""
+    try:
+        doc = fitz.open(pdf_path)
+        return "\n".join(page.get_text("text",sort=True) for page in doc)
+    
+    except Exception :
+        return ""
 
 
 def normalize_text(s: str) -> str:
@@ -42,6 +48,9 @@ EXCLUDED_PATTERNS = [
 ]
 
 def extract_relevant_snippets(text: str, window: int = 2, max_lines: int = 120) -> str:
+    if text == "":
+        return ""
+    
     raw_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     norm_lines = [normalize_text(ln) for ln in raw_lines]
 
@@ -61,11 +70,12 @@ def extract_relevant_snippets(text: str, window: int = 2, max_lines: int = 120) 
     return "\n".join(selected[:max_lines])
 
 
-# text2 = extract_text_pdf(r"app\Contrat_Test_Dupont.pdf")
-# text1 = extract_text_pdf(r"app\Contrat_04-06Juillet_short.pdf")
-#text3= extract_text_pdf(r"app\izi2.pdf")
-#print(text3)
-#print(extract_relevant_snippets(text=text3))
+#text2 = extract_text_pdf(r"app\qapa1.pdf")
+# # text1 = extract_text_pdf(r"app\Contrat_04-06Juillet_short.pdf")
+# #text3= extract_text_pdf(r"app\izi2.pdf")
+#print(text2.strip() == "")
+
+# print(extract_relevant_snippets(text=text2))
 
 
 

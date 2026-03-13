@@ -1,2 +1,9 @@
 venvHoraire
 *.pdf
+
+helpers.py
+schema.py
+table_structure.py
+db.py
+dummy.db
+__pycache__

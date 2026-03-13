@@ -2,8 +2,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage,SystemMessage
 
 from extract import extract_text_pdf,extract_relevant_snippets
-from schema import ContratOutput,State
-from pydantic import ValidationError
+from schema import State,ContractOutput
 
 from langgraph.graph import START,END,StateGraph
 
@@ -17,44 +16,70 @@ llm = ChatGroq(
         api_key=os.getenv("myfirstApiKey"),
         model="qwen/qwen3-32b",
         temperature=0.1,
-    ).with_structured_output(ContratOutput)
+    ).with_structured_output(ContractOutput)
+
 
 
 
 sys_mess = """
 Tu reçois du texte extrait d'un contrat de travail.
 
-Ta mission est d'extraire les informations suivantes dans le schéma demandé :
+Ta mission est d'extraire uniquement les informations utiles au calcul d'une estimation de salaire.
 
-- periode :
-    - debut
-    - fin
+Tu dois remplir exactement le schéma demandé avec les champs suivants :
 
-- heures :
-    - retourne une LISTE
-    - chaque élément doit contenir :
-        - type parmi ["hebdomadaire", "mensuel", "quotidien", "plage_horaire", "total", "inconnu"]
-        - valeur (texte exact ou presque exact extrait du document)
+- periode (toujours au format dd/mm/yyyy):
+    - debut : date de début du contrat ou de la mission 
+    - fin : date de fin du contrat ou de la mission
 
-- remuneration :
-    - retourne une LISTE
-    - chaque élément doit contenir :
-        - type parmi ["taux_horaire", "mensuel_brut", "mensuel_net", "prime", "majoration", "inconnu"]
-        - valeur numérique si identifiable
-        - devise = "EUR" si non précisé autrement
-        - label si utile (ex: "prime casse-croûte", "majoration dimanche", "majoration nuit")
+- base_hours :
+    - type parmi ["hebdomadaire", "mensuel", "mission", "inconnu"]
+    - valeur : nombre d'heures de base prévu au contrat
+    Exemples :
+    - 35 heures par semaine -> type="hebdomadaire", valeur=35
+    - 151,67 heures par mois -> type="mensuel", valeur=151.67
+    - mission de quelques heures -> type="mission"
+
+- base_hourly_rate :
+    - taux horaire brut de base
+    - si plusieurs taux existent, prends le taux horaire normal de référence, pas les taux majorés
+
+- base_salary_reference :
+    - salaire mensuel ou montant de référence si clairement indiqué
+    - utile seulement comme information complémentaire ou de secours
+
+- daily_hours :
+    - nombre d'heures travaillées sur une journée si une plage horaire claire est indiquée, s'il y en a plusieurs, prend la plus petite
+    - exemple : 10H00 à 16H30 = 6.5 
+
+- mission_days :
+    - nombre de jours couverts par la mission si la période est courte et clairement identifiable
+    - exemple : du 11/04/2022 au 16/04/2022 = 5  
+
+- special_rate_rules :
+    - retourne uniquement les règles spéciales détectées dans le contrat parmi :
+        - night
+        - sunday
+        - holiday
+    - pour chaque règle :
+        - label parmi ["night", "sunday", "holiday"]
+        - type parmi ["percent", "hourly_rate", "hourly_bonus"]
+        - value numérique
+        - condition si utile
+
+Interprétation des types :
+- percent = pourcentage de majoration, exemple 50 pour +50%
+- hourly_rate = taux horaire spécial complet, exemple 17.2 €/h
+- hourly_bonus = supplément horaire ajouté au taux de base, exemple 1.231 €/h
 
 Règles importantes :
-- S'il y a plusieurs horaires, plusieurs durées ou plusieurs rémunérations, retourne-les toutes
-- Ne retourne jamais un tableau à la place d'un objet simple pour `periode`
-- Convertie toujours les date en format jour/mois/année
+- priviligie l'extraction des heures journalières ou hedomadaires par rapport aux heures mensuelles si le contrat contient les deux informations.
+- N'extrais PAS les règles d'heures supplémentaires.
+- N'extrais PAS les primes de repas, salissure, panier ou autres primes fixes dans special_rate_rules.
+- Ne prends pas une date isolée non liée à la mission comme période.
+- Si une information est absente, mets null.
+- Si une information est ambiguë, mets null et explique brièvement dans commentaire.
 - Ne devine pas.
-- Si une information n'est pas certaine, mets-la dans `commentaire`.
-- Pour `valeur`, garde un nombre simple quand c'est possible.
-- Pour la période, n'extrais une date de début ou de fin que si elle est clairement liée à la mission ou au contrat de travail.
-- N'utilise pas une date isolée (exemple : date de naissance, date administrative) comme période de mission.
-- Si aucune période de mission claire n'est trouvée, mets debut=None et fin=None.
-- N'extrais pas une valeur numérique seule si son contexte n'est pas clair, sans libellé clair ne doit pas être classée
 """
 
 
@@ -62,20 +87,27 @@ def extraction(state:State):
     pdf_path = state["messages"][-1].content
     text_raw = extract_text_pdf(pdf_path=pdf_path)
     text = extract_relevant_snippets(text=text_raw)
+    if text.strip() == "":
 
-    return {"retrieved_text":text}
+        return {"retrieved_text":text,"trust":False}
+    
+    return {"retrieved_text":text,"trust":True}
 
 
 
 def llm_response(state:State):
     text = state["retrieved_text"]
+     
+    if state["trust"]:
 
-    final_output= llm.invoke([
-            SystemMessage(content=sys_mess),
-            HumanMessage(content= f"Voici le texte extrait du contrat: {text}")
-        ])
+        final_output= llm.invoke([
+                SystemMessage(content=sys_mess),
+                HumanMessage(content= f"Voici le texte extrait du contrat: {text}")
+            ])
+        
+        return {"final_output":final_output,"comment":None}
     
-    return {"final_output":final_output}
+    return {"final_output":None,"comment":"Svp, vérifiez que votre fichier est bien un pdf (nom du fichier se terminant par .pdf) ou vérifiez que votre pdf est de bonne qualité et qu'il ne soit pas un pdf scanné."}
 
 
 # def output_validation(state:State):
@@ -108,6 +140,8 @@ def make_agent():
     return graph.compile()
 
 
+"""
+
 agent = make_agent()
 # # Use a HumanMessage to properly format the input
 # from langchain_core.messages import HumanMessage
@@ -119,7 +153,7 @@ path4=r"app\izi2.pdf"
 
 
 events = agent.stream(
-   {"messages": [HumanMessage(content=path3)]},
+   {"messages": [HumanMessage(content=path1)]},
     stream_mode="values"
 )
 
@@ -140,3 +174,6 @@ print("final : ",final.model_dump())
 #     tch = event["tech"] if "tech" in event and event["tech"] else None
 #     nw = event["news"] if "news" in event and event["news"] else None
 #     fl = event["final"] if "final" in event and event["final"] else None
+
+
+"""
