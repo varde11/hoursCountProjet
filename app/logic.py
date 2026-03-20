@@ -7,13 +7,12 @@ from schema import State,ContractOutput
 from langgraph.graph import START,END,StateGraph
 
 import os
-from dotenv import load_dotenv
 
 
 
-load_dotenv()
+
 llm = ChatGroq(
-        api_key=os.getenv("myfirstApiKey"),
+        api_key=os.getenv("GROQ_API_KEY"),
         model="qwen/qwen3-32b",
         temperature=0.1,
     ).with_structured_output(ContractOutput)

@@ -37,7 +37,72 @@ async def lifespan(app:FastAPI):
     print("Fermeture de l'application, merci de l'avoir essayer ;)")
 
 
+
+
+
+
+
 app = FastAPI(title="CountHoursAPI",lifespan=lifespan)
+
+
+
+
+from jose import jwt
+from datetime import datetime, timedelta, timezone
+from schema import TokenOut,ClientLogin
+
+SECRET_KEY = "change-moi-dans-un-env"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+@app.post("/login", response_model=TokenOut)
+def login(client_data: ClientLogin, db: Session = Depends(get_db)):
+    client = db.query(Client).filter(Client.id_client == client_data.id_client).first()
+
+    if not client or not verify_password(client_data.password, client.password_hash):
+        raise HTTPException(status_code=401, detail="Identifiants invalides")
+
+    token = create_access_token({"sub": client.id_client})
+
+    return TokenOut(access_token=token)
+
+
+@app.get("/healthy")
+def get_healthy():
+    return {"healthy":"Okayyy"}
+
+
+
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+security = HTTPBearer()
+
+def get_current_client(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        id_client = payload.get("sub")
+        if not id_client:
+            raise HTTPException(status_code=401, detail="Token invalide")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token invalide ou expiré")
+
+    client = db.query(Client).filter(Client.id_client == id_client).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client introuvable")
+
+    return client
+
+
 
 
 
@@ -65,8 +130,8 @@ def get_contract_info(
             raise HTTPException(status_code=422,detail=comment)
     finally:
         os.remove(path_contrat)
-        print("Le fichier a bien été supprimé")
-        print("texte",txt)
+        #print("Le fichier a bien été supprimé")
+        #print("texte",txt)
     return final
 
     
@@ -250,11 +315,11 @@ def estimate_salary(contract: ContractOutput, work_input: WorkInput) -> SalaryEs
 
 
 
-@app.get("/GetClientByIdClient/{id_client}")
-def get_client_by_id_client(id_client:str,db:Session=Depends(get_db)):
-    client = db.query(Client).filter(Client.id_client==id_client).first()
+@app.get("/Me")
+def get_client_by_id_client(current_client:Client=Depends(get_current_client),db:Session=Depends(get_db)):
+    client = db.query(Client).filter(Client.id_client==current_client.id_client).first()
     if not client:
-        raise HTTPException(status_code=404,detail=f"Le client d'identifiant {id_client} n'existe pas.")
+        raise HTTPException(status_code=404,detail=f"Le client d'identifiant {current_client.id_client} n'existe pas.")
     return client
 
 @app.get("/GetAllClient")
@@ -298,12 +363,12 @@ def get_estimation_by_id_estimation(id_estimation:int,db:Session=Depends(get_db)
 
 
 @app.get("/GetEstimationByIdClient",response_model=list[EstimationOut])
-def get_estimation_by_id_client(id_client:str,db:Session=Depends(get_db)):
+def get_estimation_by_id_client(current_client:Client=Depends(get_current_client),db:Session=Depends(get_db)):
     
-    if not db.query(exists().where(Client.id_client==id_client)).scalar():
-        raise HTTPException(status_code=404, detail=f"Il n'existe aucun client avec l'identifiant {id_client}")
+    if not db.query(exists().where(Client.id_client==current_client.id_client)).scalar():
+        raise HTTPException(status_code=404, detail=f"Il n'existe aucun client avec l'identifiant {current_client.id_client}")
 
-    estimation = db.query(Estimation).filter(Estimation.id_client==id_client).all()
+    estimation = db.query(Estimation).filter(Estimation.id_client==current_client.id_client).all()
     if not estimation:
         return []
     
@@ -312,7 +377,7 @@ def get_estimation_by_id_client(id_client:str,db:Session=Depends(get_db)):
 
 @app.post("/EstimateSalary",response_model=EstimationOut)
 def get_contrat_info(
-    id_client:str = Form(".."),
+    current_client:Client=Depends(get_current_client),
     db:Session=Depends(get_db),
     contrat_para: UploadFile = File(...),
     break_hours: float = Form(0.0),
@@ -323,9 +388,9 @@ def get_contrat_info(
     holiday_hours: float = Form(0.0),
     comment: Optional[str] = Form(None)
 ):
-    client = db.query(Client).filter(Client.id_client==id_client).first()
+    client = db.query(Client).filter(Client.id_client==current_client.id_client).first()
     if not client:
-        raise HTTPException(status_code=404,detail=f"Le client d'identifiant {id_client} n'existe pas.")
+        raise HTTPException(status_code=404,detail=f"Le client d'identifiant {current_client.id_client} n'existe pas.")
 
 
     contract = get_contract_info(contrat=contrat_para)
@@ -338,7 +403,7 @@ def get_contrat_info(
         holiday_hours=holiday_hours,
         comment=comment
     )
-    print(contract)
+    #print(contract)
     estimation_raw = estimate_salary(contract=contract, work_input=work_para)
 
     try:
@@ -347,9 +412,9 @@ def get_contrat_info(
         raise HTTPException(detail=f"Something went very wrong about the estimation: {ve}",status_code=500)
     
     estimation = Estimation(
-        id_client = id_client,
+        id_client = current_client.id_client,
         date_debut = datetime.strptime(contract.periode.debut,"%d/%m/%Y").date() if contract.periode.debut else None,
-        date_fin = datetime.strptime(contract.periode.fin,"%d/%m/%Y").date() if contract.periode.debut else None,
+        date_fin = datetime.strptime(contract.periode.fin,"%d/%m/%Y").date() if contract.periode.fin else None,
         planned_hours = estimation_raw.planned_hours,
         actual_hours = estimation_raw.actual_hours,
         normal_hours = estimation_raw.normal_hours,
@@ -400,14 +465,14 @@ def del_estimation_by_idestimation(id_estimation:int,db:Session=Depends(get_db))
 
 del_description2="Supprimer toutes les estimations remettra votre compteur d'heure à 0."
 @app.delete("/DelEstimationByIdClient",response_model=list[EstimationOut],description=del_description2)
-def del_estimation_by_idclient(id_client:str,db:Session=Depends(get_db)):
+def del_estimation_by_idclient(current_client:Client=Depends(get_current_client),db:Session=Depends(get_db)):
 
-    client = db.query(Client).filter(Client.id_client==id_client).first()
+    client = db.query(Client).filter(Client.id_client==current_client.id_client).first()
     if not client:
-        raise HTTPException (status_code=404,detail=f"Le client d'identifiant {id_client} est introuvable.")
+        raise HTTPException (status_code=404,detail=f"Le client d'identifiant {current_client.id_client} est introuvable.")
     
     try:
-        estimations = db.query(Estimation).filter(Estimation.id_client==id_client).all()
+        estimations = db.query(Estimation).filter(Estimation.id_client==current_client.id_client).all()
         if not estimations :
             return []
         
@@ -416,7 +481,7 @@ def del_estimation_by_idclient(id_client:str,db:Session=Depends(get_db)):
         raise HTTPException(status_code=500,detail= f"Quelque chose s'est mal passé: {ve}")
     
     client.total_hours = 0
-    db.query(Estimation).filter(Estimation.id_client==id_client).delete(synchronize_session=False)
+    db.query(Estimation).filter(Estimation.id_client==current_client.id_client).delete(synchronize_session=False)
     
     db.commit()
     db.refresh(client)
