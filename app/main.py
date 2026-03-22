@@ -1,9 +1,10 @@
-from schema import ContractOutput,WorkInput,SalaryEstimation,SalaryLine,ClientIn,EstimationOut,ClientOut
+from schema import ContractOutput,WorkInput,SalaryEstimation,SalaryLine,ClientIn,EstimationOut,ClientOut,TokenOut,ClientLogin
 from helpers import get_planned_hours,split_overtime_hours,get_special_rule,hash_password,verify_password
 from logic import make_agent
 from langchain_core.messages import HumanMessage
 
 from fastapi import FastAPI,UploadFile,File,Form,Depends,HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -12,11 +13,12 @@ from db import get_db, sessionLocal,engine
 from sqlalchemy.orm import Session
 from sqlalchemy import exists
 from table_structure import Base,Estimation,Client
-from datetime import datetime,date
+from datetime import datetime,timedelta, timezone
 from pydantic import ValidationError
 
 import shutil
 import os
+from jose import jwt
 
 
 agent = None
@@ -38,22 +40,13 @@ async def lifespan(app:FastAPI):
 
 
 
-
-
-
-
 app = FastAPI(title="CountHoursAPI",lifespan=lifespan)
 
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
 
 
-
-from jose import jwt
-from datetime import datetime, timedelta, timezone
-from schema import TokenOut,ClientLogin
-
-SECRET_KEY = "change-moi-dans-un-env"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES) -> str:
     to_encode = data.copy()
@@ -61,25 +54,7 @@ def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_M
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-@app.post("/login", response_model=TokenOut)
-def login(client_data: ClientLogin, db: Session = Depends(get_db)):
-    client = db.query(Client).filter(Client.id_client == client_data.id_client).first()
 
-    if not client or not verify_password(client_data.password, client.password_hash):
-        raise HTTPException(status_code=401, detail="Identifiants invalides")
-
-    token = create_access_token({"sub": client.id_client})
-
-    return TokenOut(access_token=token)
-
-
-@app.get("/healthy")
-def get_healthy():
-    return {"healthy":"Okayyy"}
-
-
-
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 security = HTTPBearer()
 
 def get_current_client(
@@ -102,6 +77,23 @@ def get_current_client(
 
     return client
 
+
+
+@app.post("/login", response_model=TokenOut)
+def login(client_data: ClientLogin, db: Session = Depends(get_db)):
+    client = db.query(Client).filter(Client.id_client == client_data.id_client).first()
+
+    if not client or not verify_password(client_data.password, client.password_hash):
+        raise HTTPException(status_code=401, detail="Identifiants invalides")
+
+    token = create_access_token({"sub": client.id_client})
+
+    return TokenOut(access_token=token)
+
+
+@app.get("/healthy")
+def get_healthy():
+    return {"healthy":"Okayyy"}
 
 
 
@@ -487,134 +479,3 @@ def del_estimation_by_idclient(current_client:Client=Depends(get_current_client)
     db.refresh(client)
 
     return deleted
-    
-        
-    
-
-
-
-
-
-from jose import jwt
-from datetime import datetime, timedelta, timezone
-from schema import TokenOut,ClientLogin
-
-SECRET_KEY = "change-moi-dans-un-env"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-@app.post("/login", response_model=TokenOut)
-def login(client_data: ClientLogin, db: Session = Depends(get_db)):
-    client = db.query(Client).filter(Client.id_client == client_data.id_client).first()
-
-    if not client or not verify_password(client_data.password, client.password_hash):
-        raise HTTPException(status_code=401, detail="Identifiants invalides")
-
-    token = create_access_token({"sub": client.id_client})
-
-    return TokenOut(access_token=token)
-
-
-
-
-
-
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-security = HTTPBearer()
-
-def get_current_client(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-):
-    token = credentials.credentials
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        id_client = payload.get("sub")
-        if not id_client:
-            raise HTTPException(status_code=401, detail="Token invalide")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Token invalide ou expiré")
-
-    client = db.query(Client).filter(Client.id_client == id_client).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client introuvable")
-
-    return client
-
-
-
-
-
-
-
-
-
-
-"""
-agent = make_agent()
-
-path1=r"app\Contrat_04-06Juillet_short.pdf"
-path2=r"app\Contrat_Test_Dupont.pdf"
-path3=r"app\izi1.pdf"
-path4=r"app\izi2.pdf"
-
-
-for path in [path1,path3]:
-
-    print("path:",path,"\n")
-    events = agent.stream(
-    {"messages": [HumanMessage(content=path)]},
-        stream_mode="values"
-    )
-
-    for event in events:
-        txt = event["retrieved_text"] if "retrieved_text" in  event and event["retrieved_text"] else None
-        final = event["final_output"] if "final_output" in event and event["final_output"] else None
-
-    print(final)
-    print("*********************")
-    print(txt)
-
-    for i in range(0,11,2):
-        work = WorkInput(
-            missing_hours=0,
-            extra_hours=i,
-            night_hours=i-i%2,
-            sunday_hours=2*i-i%2,
-            holiday_hours=i//5
-        )
-        print(f"work{i}: ",work)
-        print("\n")
-        print(f"estimation{i}: ",estimate_salary(contract=final,work_input=work))
-        print('----------------------------------------')
-    
-    print("##########################################################\n")
-
-
-
-
-
-
-work = WorkInput(
-    missing_hours=0,
-    extra_hours=0,
-    night_hours=12,
-    sunday_hours=0,
-    holiday_hours=0
-)
-
-
-print(estimate_salary(contract=final,work_input=work))
-print('******************')
-print(final)
-print("*********************")
-print(txt)
-
-"""

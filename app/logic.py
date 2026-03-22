@@ -1,16 +1,17 @@
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage,SystemMessage
 
-from extract import extract_text_pdf,extract_relevant_snippets
+from extract import extract_text_pdf,extract_text_pdf_ocr,extract_relevant_snippets
 from schema import State,ContractOutput
 
 from langgraph.graph import START,END,StateGraph
 
 import os
+# from dotenv import load_dotenv
 
 
 
-
+#load_dotenv()
 llm = ChatGroq(
         api_key=os.getenv("GROQ_API_KEY"),
         model="qwen/qwen3-32b",
@@ -85,10 +86,18 @@ Règles importantes :
 def extraction(state:State):
     pdf_path = state["messages"][-1].content
     text_raw = extract_text_pdf(pdf_path=pdf_path)
+    
+
+    if text_raw.strip() == "":
+        text_raw = extract_text_pdf_ocr(pdf_path=pdf_path)
+        if text_raw.strip() == "":
+            return {"retrieved_text":"","trust":False}
+
+      
     text = extract_relevant_snippets(text=text_raw)
     if text.strip() == "":
-
-        return {"retrieved_text":text,"trust":False}
+         return {"retrieved_text":"","trust":False}
+        
     
     return {"retrieved_text":text,"trust":True}
 
@@ -106,7 +115,7 @@ def llm_response(state:State):
         
         return {"final_output":final_output,"comment":None}
     
-    return {"final_output":None,"comment":"Svp, vérifiez que votre fichier est bien un pdf (nom du fichier se terminant par .pdf) ou vérifiez que votre pdf est de bonne qualité et qu'il ne soit pas un pdf scanné."}
+    return {"final_output":None,"comment":"Une erreur s'est produit, vérifiez que votre fichier (contrat) est bien un pdf (nom du fichier se terminant par .pdf) et qu'il est de bonne qualité."}
 
 
 # def output_validation(state:State):
@@ -139,35 +148,40 @@ def make_agent():
     return graph.compile()
 
 
-"""
+""""""
 
 agent = make_agent()
 # # Use a HumanMessage to properly format the input
 # from langchain_core.messages import HumanMessage
 
-path1=r"app\Contrat_04-06Juillet_short.pdf"
-path2=r"app\Contrat_Test_Dupont.pdf"
-path3=r"app\izi1.pdf"
-path4=r"app\izi2.pdf"
+# path1=r"app\Contrat_04-06Juillet_short.pdf"
+# path2=r"app\Contrat_Test_Dupont.pdf"
+# path3=r"app\izi1.pdf"
+# path4=r"app\izi2.pdf"
+# path = r"app\pdf\scalaire_esther (3).pdf"
+# path1 = r"app\pdf\grand perroquet.webp"
 
 
-events = agent.stream(
-   {"messages": [HumanMessage(content=path1)]},
-    stream_mode="values"
-)
+# events = agent.stream(
+#    {"messages": [HumanMessage(content=path1)]},
+#     stream_mode="values"
+# )
 
 
-for event in events:
-    msg= event["messages"] if "messages" in event and event["messages"] else None
-    txt = event["retrieved_text"] if "retrieved_text" in  event and event["retrieved_text"] else None
-    final = event["final_output"] if "final_output" in event and event["final_output"] else None
+# for event in events:
+#     msg= event["messages"] if "messages" in event and event["messages"] else None
+#     txt = event["retrieved_text"] if "retrieved_text" in  event and event["retrieved_text"] else None
+#     final = event["final_output"] if "final_output" in event and event["final_output"] else None
+#     comment = event["comment"] if "comment" in event and event["comment"] else None
 
 
-print("message : ",msg)
-print("********************************************")
-print("texte : ",txt)
-print("********************************************")
-print("final : ",final.model_dump())
+# print("message : ",msg)
+# print("********************************************")
+# print("texte : ",txt)
+# print("********************************************")
+# print("final : ",final.model_dump() if hasattr(final,"model_dump") else final)
+# print("********************************************")
+# print("comment:",comment)
 # for event in events:
 #     msg = event["messages"] if "messages" in event and event["messages"] else None
 #     tch = event["tech"] if "tech" in event and event["tech"] else None
@@ -175,4 +189,3 @@ print("final : ",final.model_dump())
 #     fl = event["final"] if "final" in event and event["final"] else None
 
 
-"""
