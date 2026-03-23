@@ -26,11 +26,12 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       ALGORITHM: ${ALGORITHM}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      AUTHORIZED_URL: ${AUTHORIZED_URL}
       
   
-  ui:
+  front:
     image: varde11/hours_ui:1.0
-    build: ./ui
+    build: ./front
     container_name: containerhoursui
     ports:
       - "8501:8501"

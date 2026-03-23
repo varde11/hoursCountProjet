@@ -3,5 +3,4 @@ __pycache__
 pdf
 .env
 ui
-table_structure.py
-create_test_pdf.py
+front

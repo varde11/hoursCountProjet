@@ -5,6 +5,8 @@ from langchain_core.messages import HumanMessage
 
 from fastapi import FastAPI,UploadFile,File,Form,Depends,HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -41,6 +43,14 @@ async def lifespan(app:FastAPI):
 
 
 app = FastAPI(title="CountHoursAPI",lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("AUTHORIZED_URL")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"], 
+)
+
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
@@ -432,7 +442,7 @@ def get_contrat_info(
 
     
 del_description1 = "Supprimer une estimation retirera les heures apportées par cette estimation dans votre profil."
-@app.delete("/DelEsitimationByIdEstimation/{id_estimation}",response_model=EstimationOut,description=del_description1)
+@app.delete("/DelEstimationByIdEstimation/{id_estimation}",response_model=EstimationOut,description=del_description1)
 def del_estimation_by_idestimation(id_estimation:int,db:Session=Depends(get_db)):
 
     estimation = db.query(Estimation).filter(Estimation.id_estimation==id_estimation).first()
