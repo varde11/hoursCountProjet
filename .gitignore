@@ -3,4 +3,6 @@ __pycache__
 pdf
 .env
 ui
-front
+front/src
+front/dist
+front/node_modules
